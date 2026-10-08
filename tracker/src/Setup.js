@@ -112,6 +112,7 @@ function setupDealersSheet_(ss) {
   sheet.setColumnWidth(col('Config notes'), 250);
   sheet.setColumnWidth(col('Freebies'), 250);
   sheet.setColumnWidth(col('Summary'), 350);
+  sheet.hideColumns(col(SORT_KEY_COLUMN));
 }
 
 function removeObsoleteColumns_(sheet) {
@@ -119,6 +120,20 @@ function removeObsoleteColumns_(sheet) {
   for (let i = headers.length - 1; i >= 0; i--) {
     if (OBSOLETE_COLUMNS.indexOf(headers[i]) !== -1) sheet.deleteColumn(i + 1);
   }
+  addMissingColumns_(sheet);
+}
+
+// Columns added in newer versions: insert them next to their group neighbour, keeping existing data.
+function addMissingColumns_(sheet) {
+  COLUMNS.forEach((name, k) => {
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+    if (headers.indexOf(name) !== -1) return;
+    const prev = k > 0 ? headers.indexOf(COLUMNS[k - 1]) + 1 : 0; // 1-based column to insert after (0 = first)
+    if (prev > 0) sheet.insertColumnAfter(prev); else sheet.insertColumnBefore(1);
+    const at = prev + 1;
+    const group = COLUMN_GROUPS.find((g) => g.columns.indexOf(name) !== -1);
+    sheet.getRange(1, at).setValue(name).setFontWeight('bold').setFontColor('#ffffff').setBackground(group ? group.color : null);
+  });
 }
 
 // Deletes the Dealers and Log sheets and rebuilds them from scratch. API key and trigger are kept.

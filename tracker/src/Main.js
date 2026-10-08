@@ -9,7 +9,9 @@ function processInbox() {
     if (!apiKey) throw new Error('Missing Gemini API key. Use menu: Suzuki Bot → Set Gemini API key.');
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const table = new SheetTable_(ss.getSheetByName(CONFIG.SHEETS.DEALERS));
+    const dealersSheet = ss.getSheetByName(CONFIG.SHEETS.DEALERS);
+    if (dealersSheet && dealersSheet.getLastRow() > 1) addMissingColumns_(dealersSheet);
+    const table = new SheetTable_(dealersSheet);
     const logSheet = ss.getSheetByName(CONFIG.SHEETS.LOG);
     if (!table.sheet || !logSheet) throw new Error('Run "Setup sheets" first.');
 
@@ -41,6 +43,12 @@ function processInbox() {
         const picked = candidates.filter((d) => d.code === a.dealerCode);
         if (!matched.length && !picked.length) {
           appendLog_(logSheet, email, [], 'UNMATCHED', 'Dealer not identified. ' + a.summary);
+          continue;
+        }
+        // Domain shared by several branches and Gemini can't tell which one wrote: don't guess, leave it to you.
+        if (!picked.length && candidates.length > 1 && !matched.exact) {
+          appendLog_(logSheet, email, candidates.map((d) => d.code), 'UNMATCHED',
+            'Could not tell which branch sent this (' + candidates.map((d) => d.name).join(' / ') + '). ' + a.summary);
           continue;
         }
         codes = (picked.length ? picked : candidates).map((d) => d.code);
@@ -120,9 +128,16 @@ function recomputeRanking() {
 
 // ---------- matching ----------
 
+// Domain name without TLD/sub-domains: suzukivarga.hu and mail.suzukivarga.com → suzukivarga
+function domainStem_(domain) {
+  const p = String(domain || '').split('.');
+  return p.length >= 2 ? p[p.length - 2] : '';
+}
+
 function buildDealerIndex_() {
   const byEmail = {};
   const byDomain = {};
+  const byStem = {};
   const add = (map, key, d) => {
     if (!key) return;
     map[key] = map[key] || [];
@@ -135,23 +150,32 @@ function buildDealerIndex_() {
     });
     if (d.websiteDomain && !isGenericDomain_(d.websiteDomain)) add(byDomain, d.websiteDomain, d);
   });
-  return { byEmail, byDomain };
+  Object.keys(byDomain).forEach((dom) => {
+    const stem = domainStem_(dom);
+    if (stem.length >= 5) byDomain[dom].forEach((d) => add(byStem, stem, d));
+  });
+  return { byEmail, byDomain, byStem };
 }
 
+// Returns the possible sending dealers. exact=true when matched by a listed address (sender, or the address you
+// wrote to in this thread): a shared address speaks for every branch behind it.
 function findCandidates_(email, index) {
-  if (index.byEmail[email.fromEmail]) return index.byEmail[email.fromEmail];
+  const exact = (dealers) => Object.assign(dealers.slice(), { exact: true });
+  if (index.byEmail[email.fromEmail]) return exact(index.byEmail[email.fromEmail]);
 
   const fromThread = [];
   sentRecipientsInThread_(email.threadId).forEach((e) => {
     (index.byEmail[e] || []).forEach((d) => fromThread.indexOf(d) === -1 && fromThread.push(d));
   });
-  if (fromThread.length) return fromThread;
+  if (fromThread.length) return exact(fromThread);
 
   const dom = domainOf_(email.fromEmail);
   if (isGenericDomain_(dom)) return [];
   // Also match sub-domains, e.g. mail.kovesdan.hu → kovesdan.hu
   const key = Object.keys(index.byDomain).find((k) => dom === k || dom.endsWith('.' + k));
-  return key ? index.byDomain[key] : [];
+  if (key) return index.byDomain[key].slice();
+  // Same name, other TLD, e.g. suzukivarga.com → suzukivarga.hu
+  return (index.byStem[domainStem_(dom)] || []).slice();
 }
 
 // ---------- analysis → sheet ----------
@@ -179,7 +203,7 @@ function rowUpdates_(a, status, email) {
     'Last reply': email.date,
     'Thread': 'https://mail.google.com/mail/u/0/#all/' + email.threadId,
   };
-  const offerCols = ['ETA', 'Paid accessories (Ft)', 'Final total (Ft)', 'Winter tires', 'Freebies', 'Freebies value (Ft)', 'Offer valid until'];
+  const offerCols = ['ETA', 'Paid accessories (Ft)', 'Final total (Ft)', 'Winter tires', 'Freebies', 'Freebies value (Ft)', 'Optional extras', 'Price conditions', 'Offer valid until'];
   // Not available: clear offer cells so no ETA/price of a different car (or an outdated offer) stays on the row.
   if (status === STATUS.NOT_AVAILABLE) {
     offerCols.forEach((c) => { u[c] = ''; });
@@ -196,6 +220,8 @@ function rowUpdates_(a, status, email) {
       'Winter tires': a.includesWinterTires ? 'Yes' : 'No',
       'Freebies': [a.freebies, a.paidAccessories && 'Paid: ' + a.paidAccessories].filter(Boolean).join(' | '),
       'Freebies value (Ft)': a.freebiesValue || 0,
+      'Optional extras': a.optionalExtras || '',
+      'Price conditions': a.priceConditions || '',
       'Offer valid until': a.offerValidUntil || '',
     });
   }
@@ -258,10 +284,26 @@ function recomputeRanking_(table) {
     .sort((x, y) => x.cost - y.cost);
   const rankByCode = {};
   scored.forEach((s, i) => { rankByCode[s.code] = { cost: s.cost, rank: i + 1 }; });
-  table.writeColumns(['Effective cost (Ft)', 'Rank'], (r) => {
+  // Unranked rows follow in this status order.
+  const statusOrder = [STATUS.IN_STOCK, STATUS.IN_PRODUCTION, STATUS.NEEDS_REVIEW, STATUS.NEEDS_ACTION, STATUS.WAITING, STATUS.NOT_AVAILABLE];
+  table.writeColumns(['Effective cost (Ft)', 'Rank', SORT_KEY_COLUMN], (r) => {
     const s = rankByCode[r['Code']];
-    return s ? [s.cost, s.rank] : ['', ''];
+    if (s) return [s.cost, s.rank, s.rank];
+    const i = statusOrder.indexOf(String(r['Status']));
+    return ['', '', 1000 + (i === -1 ? 99 : i)];
   });
+  sortDealers_(table);
+}
+
+// Native sort, so cell notes/comments move together with their row.
+function sortDealers_(table) {
+  const sheet = table.sheet;
+  const n = sheet.getLastRow() - 1;
+  if (n < 2) return;
+  const key = table.col(SORT_KEY_COLUMN) + 1;
+  sheet.getRange(2, 1, n, sheet.getLastColumn())
+    .sort([{ column: key, ascending: true }, { column: table.col('Distance (km)') + 1, ascending: true }]);
+  sheet.hideColumns(key);
 }
 
 // ---------- sheet helpers ----------

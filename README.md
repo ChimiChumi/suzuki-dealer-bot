@@ -63,9 +63,18 @@ final gross total − paid accessories − winter tires value − freebies value
 
 Weights live in `CONFIG.SCORING` (`tracker/src/Config.js`).
 
+- **Final total** = gross car price + registration costs that a private buyer without trade-in pays (separately listed parts are added up). Optional extras and insurance are never included.
+- **Paid accessories** = priced dealer extras already included in the final total (subtracted for a fair comparison).
+- **Winter tires = Yes** only when the set is explicitly free. A priced set (e.g. "téli kerék szett: 370.000 Ft") goes to **Optional extras** and does not affect the ranking.
+- **Price conditions** = what the price depends on (hűségprogram, financing, trade-in, occupation…). Check these before deciding.
+
+After every run the Dealers sheet is re-sorted: ranked dealers first (best first), then *In stock → In production → Needs review → Needs action → Waiting → Not available*, each by distance from Budapest (hidden `Sort key` column; cell notes move with their row).
+
+Model: `CONFIG.GEMINI_MODEL` (default `gemini-3.8-flash`). New columns added in later versions are inserted into an existing sheet automatically.
+
 ## Dealer matching
 
-Reply sender → exact dealer email → recipients of your own sent message in the same thread → dealer domain (free-mail domains excluded). When several branches share a domain, Gemini picks the branch from the signature. If the sender is unknown (e.g. a salesperson's private address), Gemini identifies the dealer from the signature/address; if it can't, the email is logged as `UNMATCHED`. Automatic acknowledgements ("offer will be sent soon") are logged as `IGNORED` and don't change the status.
+Reply sender → exact dealer email → recipients of your own sent message in the same thread → dealer domain (free-mail domains excluded) → same domain name with another TLD (e.g. `suzukivarga.com` → `suzukivarga.hu`). When several branches share a domain, Gemini picks the branch from the signature; if it can't, the email is logged as `UNMATCHED` instead of updating every branch (a shared *listed* address still updates all its branches). Besides the dealer addresses, the search also catches any email since `CATCH_ALL_SINCE` mentioning `CATCH_ALL_TERMS` (Suzuki, S-Cross…), so new emails from unlisted addresses with a new subject are not missed. If the sender is unknown (e.g. a salesperson's private address), Gemini identifies the dealer from the signature/address; if it can't, the email is logged as `UNMATCHED`. Automatic acknowledgements ("offer will be sent soon") are logged as `IGNORED` and don't change the status.
 
 Emails you manually forward from an address in `CONFIG.FORWARDERS` (e.g. iCloud → Gmail) are attributed to the original sender from the forwarded `From:`/`Feladó:` header.
 

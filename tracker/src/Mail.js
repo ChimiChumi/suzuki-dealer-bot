@@ -32,6 +32,9 @@ function buildSearchQueries_() {
     // -in:sent drops your own outreach copies; not -from:me, which would also drop forwards from your own alias.
     queries.push('-in:trash -in:sent after:' + CONFIG.SEARCH_SINCE + ' {' + senders.slice(i, i + CONFIG.SEARCH_TERMS_PER_QUERY).join(' ') + '}');
   }
+  if (CONFIG.CATCH_ALL_TERMS && CONFIG.CATCH_ALL_TERMS.length) {
+    queries.push('-in:trash -in:sent after:' + CONFIG.CATCH_ALL_SINCE + ' {' + CONFIG.CATCH_ALL_TERMS.join(' ') + '}');
+  }
   return queries;
 }
 

@@ -29,10 +29,13 @@ function makeSheet(name) {
     getRange: (r, c, nr = 1, nc = 1) => { const rng = new Proxy({
       getValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => (data[r - 1 + i] || [])[c - 1 + j] ?? '')),
       setValues: (v) => { v.forEach((row, i) => row.forEach((x, j) => { data[r - 1 + i] = data[r - 1 + i] || []; data[r - 1 + i][c - 1 + j] = x; })); return rng; },
-      setValue: (x) => { data[r - 1] = data[r - 1] || []; data[r - 1][c - 1] = x; return rng; } }, { get: (t, p) => t[p] || (() => rng) }); return rng; } };
+      setValue: (x) => { data[r - 1] = data[r - 1] || []; data[r - 1][c - 1] = x; return rng; },
+      sort: (specs) => { const rows = data.slice(r - 1, r - 1 + nr); const v = (x) => (x === '' || x == null ? Infinity : x);
+        rows.sort((a, b) => { for (const s of specs) { const d = v(a[s.column - 1]) - v(b[s.column - 1]); if (d) return s.ascending ? d : -d; } return 0; });
+        data.splice(r - 1, nr, ...rows); sorts.push(specs); return rng; } }, { get: (t, p) => t[p] || (() => rng) }); return rng; } };
   return new Proxy(sh, { get: (t, p) => (p in t ? t[p] : () => undefined) });
 }
-const sheets = {};
+const sheets = {}, sorts = [];
 const ss = { getSheetByName: (n) => sheets[n] || null, insertSheet: (n) => (sheets[n] = makeSheet(n)) };
 const chain = () => new Proxy(function () {}, { get: () => chain(), apply: () => chain() });
 const ctx = { console, Gmail,
@@ -45,13 +48,16 @@ const ctx = { console, Gmail,
 vm.createContext(ctx);
 for (const f of ['Config.js', 'Dealers.js', 'Mail.js', 'Gemini.js', 'Main.js', 'Setup.js']) vm.runInContext(fs.readFileSync(path.join(SRC, f), 'utf8'), ctx, { filename: f });
 const order = [];
-ctx.__analyze = (key, email, cands) => { order.push(email.id); const a = Object.assign({}, base, MSG[email.id].a); a.dealerCode = cands[0].code; return a; };
+const seenCands = {};
+ctx.__analyze = (key, email, cands) => { order.push(email.id); seenCands[email.id] = cands.map((d) => d.name); const a = Object.assign({}, base, MSG[email.id].a); a.dealerCode = 'pick' in MSG[email.id] ? MSG[email.id].pick(cands) : cands[0].code; return a; };
 vm.runInContext('__realAnalyze = analyzeEmail_; analyzeEmail_ = (k, e, c) => __analyze(k, e, c); setupDealersSheet_(SpreadsheetApp.getActiveSpreadsheet()); setupLogSheet_(SpreadsheetApp.getActiveSpreadsheet());', ctx);
 
 // 1. query chunks
 const qs = vm.runInContext('buildSearchQueries_()', ctx);
 const allTerms = qs.flatMap((q) => q.match(/(from:\S+|subject:"[^"]+")/g));
 assert(qs.length >= 4, 'split into several queries');
+const catchAll = qs.pop();
+assert.strictEqual(catchAll, '-in:trash -in:sent after:2026/10/07 {Suzuki "S-Cross" SCross "Urban Black"}');
 qs.forEach((q) => { assert(q.length < 900, 'query short: ' + q.length); assert(q.startsWith('-in:trash -in:sent after:2026/10/01 {') && q.endsWith('}')); });
 assert(allTerms.includes('subject:"S-Cross GLX Urban Black"') && allTerms.includes('from:doboshuni@icloud.com'));
 assert.strictEqual(new Set(allTerms).size, allTerms.length, 'no duplicate terms');
@@ -108,4 +114,48 @@ for (const code of [402, 429]) {
   delete MSG[id];
   console.log('PASS Gemini ' + code + ' pauses run, email stays queued');
 }
+
+// 6. Unlisted domain with same name (suzukivarga.com vs suzukivarga.hu), new subject, not a reply
+const vargaK = vm.runInContext("DEALERS.find(d => d.name === 'Suzuki Varga - Kozármisleny').code", ctx);
+const vargaL = vm.runInContext("DEALERS.find(d => d.name === 'Suzuki Varga - Lánycsók').code", ctx);
+const before = row(vargaL);
+MSG['19a00000000000c1'] = { from: 'Gábor Abucsai <abucsai.gabor@suzukivarga.com>', date: '2026-10-12T09:00:00Z', pick: () => '',
+  a: { availability: 'IN_STOCK', configMatch: 'EXACT', hasOffer: true, finalTotalGross: 11500000, summary: 'Varga offer, branch unclear' } };
+vm.runInContext('UrlFetchApp = undefined; analyzeEmail_ = (k, e, c) => __analyze(k, e, c)', ctx);
+s = vm.runInContext('processInbox()', ctx);
+assert.strictEqual(JSON.stringify(seenCands['19a00000000000c1'].slice().sort()), JSON.stringify(['Suzuki Varga - Kozármisleny', 'Suzuki Varga - Lánycsók']));
+let last = sheets.Log.data[sheets.Log.data.length - 1];
+assert(last.includes('UNMATCHED') && /Could not tell which branch/.test(last.join(' ')), last.join(' | '));
+assert.strictEqual(row(vargaK).Status, 'Waiting for response'); assert.strictEqual(row(vargaL).Status, before.Status);
+console.log('PASS .com→.hu stem match; unclear branch → UNMATCHED, no row touched');
+
+MSG['19a00000000000c2'] = { from: 'abucsai.gabor@suzukivarga.com', date: '2026-10-12T10:00:00Z', pick: () => vargaK,
+  a: { availability: 'IN_STOCK', configMatch: 'EXACT', hasOffer: true, finalTotalGross: 11500000, summary: 'Kozármisleny offer' } };
+s = vm.runInContext('processInbox()', ctx);
+assert.strictEqual(row(vargaK).Status, 'In stock'); assert.strictEqual(row(vargaK)['Final total (Ft)'], 11500000);
+assert.strictEqual(row(vargaL).Status, before.Status, 'other branch untouched');
+console.log('PASS Gemini-picked branch updated only');
+
+// 7. Shared listed address (exact match) still updates all branches behind it when Gemini can't pick
+const shared = vm.runInContext("(() => { const m = {}; DEALERS.forEach(d => (m[d.email] = (m[d.email] || []).concat(d.code))); return Object.entries(m).find(([e, c]) => c.length > 1); })()", ctx);
+if (shared) {
+  MSG['19a00000000000c3'] = { from: shared[0], date: '2026-10-12T11:00:00Z', pick: () => '', a: { availability: 'NOT_AVAILABLE', configMatch: 'UNCLEAR', summary: 'None at any branch' } };
+  s = vm.runInContext('processInbox()', ctx);
+  shared[1].forEach((c) => assert.strictEqual(row(c).Status, 'Not available'));
+  console.log('PASS shared address (' + shared[0] + ') updates all its branches');
+}
+['19a00000000000c1', '19a00000000000c2', '19a00000000000c3'].forEach((id) => delete MSG[id]);
+
+// 8. Sheet sorted: ranked first (by rank), then status order, then distance
+assert(sorts.length > 0, 'sort called');
+const rowsNow = sheets.Dealers.data.slice(1).map((r) => { const o = {}; H.forEach((h, i) => (o[h] = r[i])); return o; });
+const order8 = ['In stock', 'In production', 'Needs review', 'Needs action', 'Waiting for response', 'Not available'];
+const keyOf = (o) => (o.Rank !== '' ? [0, o.Rank, 0] : [1, order8.indexOf(o.Status), Number(o['Distance (km)'])]);
+for (let i = 1; i < rowsNow.length; i++) {
+  const a = keyOf(rowsNow[i - 1]), b = keyOf(rowsNow[i]);
+  const cmp = a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+  assert(cmp <= 0, 'sorted at row ' + i + ': ' + JSON.stringify(a) + ' > ' + JSON.stringify(b));
+}
+assert.strictEqual(rowsNow[0].Rank, 1);
+console.log('PASS sheet sorted: rank → status → distance; top:', rowsNow.slice(0, 3).map((o) => o.Dealer + ' [' + (o.Rank || o.Status) + ']').join(', '));
 console.log('ALL PASSED');

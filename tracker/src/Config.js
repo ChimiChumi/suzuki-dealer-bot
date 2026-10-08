@@ -1,7 +1,7 @@
 // Edit these values to tune the bot. The Gemini API key lives in Script Properties (menu: Suzuki Bot → Set Gemini API key).
 
 const CONFIG = {
-  GEMINI_MODEL: 'gemini-3.5-flash',
+  GEMINI_MODEL: 'gemini-3.8-flash', // newest GA model (2026-10); 'gemini-3.1-pro-preview' is ~4-5x pricier, same results in tests
 
   // Only emails received on/after this date (YYYY/MM/DD) are analysed.
   SEARCH_SINCE: '2026/10/01',
@@ -10,6 +10,12 @@ const CONFIG = {
 
   // Your own addresses you manually forward dealer emails from. The original dealer sender is read from the forwarded header.
   FORWARDERS: ['doboshuni@icloud.com'],
+
+  // Catch-all for dealers who write a new email from an unlisted address (e.g. a salesperson at suzukivarga.com
+  // instead of suzukivarga.hu). Any received email since this date mentioning one of these terms is analysed;
+  // unrelated ones end up as IGNORED/UNMATCHED in the Log. Outreach went out on 2026-10-08.
+  CATCH_ALL_SINCE: '2026/10/07',
+  CATCH_ALL_TERMS: ['Suzuki', '"S-Cross"', 'SCross', '"Urban Black"'],
 
   MAX_MESSAGES_PER_RUN: 15,
   // Stop starting new emails after this long; Apps Script kills a run at 6 minutes.
@@ -64,9 +70,11 @@ const COLUMN_GROUPS = [
   { color: '#1f3864', columns: ['Code', 'Dealer', 'City', 'Distance (km)'] },
   { color: '#274e13', columns: ['Status', 'Rank', 'Effective cost (Ft)'] },
   { color: '#7f6000', columns: ['Config match', 'Config notes', 'Summary'] },
-  { color: '#660000', columns: ['ETA', 'Final total (Ft)', 'Paid accessories (Ft)', 'Winter tires', 'Freebies', 'Freebies value (Ft)', 'Offer valid until'] },
-  { color: '#434343', columns: ['Last reply', 'Thread', 'Email', 'Phone', 'Website'] },
+  { color: '#660000', columns: ['ETA', 'Final total (Ft)', 'Paid accessories (Ft)', 'Winter tires', 'Freebies', 'Freebies value (Ft)', 'Optional extras', 'Price conditions', 'Offer valid until'] },
+  { color: '#434343', columns: ['Last reply', 'Thread', 'Email', 'Phone', 'Website', 'Sort key'] },
 ];
+// Hidden helper column: the sheet is sorted by it after every run (rank first, then status, then distance).
+const SORT_KEY_COLUMN = 'Sort key';
 const COLUMNS = COLUMN_GROUPS.reduce((all, g) => all.concat(g.columns), []);
 
 // Columns removed from earlier versions; Setup deletes them from existing sheets.
