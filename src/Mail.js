@@ -14,7 +14,8 @@ function isGenericDomain_(domain) {
   return CONFIG.GENERIC_DOMAINS.indexOf(domain) !== -1;
 }
 
-function buildSearchQuery_() {
+// Several short queries instead of one huge OR-list: very long Gmail queries can silently drop terms.
+function buildSearchQueries_() {
   const terms = {};
   DEALERS.forEach((d) => {
     [d.email, d.serviceEmail].filter(Boolean).forEach((e) => {
@@ -26,19 +27,28 @@ function buildSearchQuery_() {
   const senders = Object.keys(terms).map((t) => 'from:' + t);
   CONFIG.FORWARDERS.forEach((e) => senders.push('from:' + e));
   if (CONFIG.OUTREACH_SUBJECT) senders.push('subject:"' + CONFIG.OUTREACH_SUBJECT.replace(/"/g, '') + '"');
-  // No -from:me: a forward from your own alias would be excluded. Own sent mail is skipped in code instead.
-  return '-in:trash after:' + CONFIG.SEARCH_SINCE + ' {' + senders.join(' ') + '}';
+  const queries = [];
+  for (let i = 0; i < senders.length; i += CONFIG.SEARCH_TERMS_PER_QUERY) {
+    // -in:sent drops your own outreach copies; not -from:me, which would also drop forwards from your own alias.
+    queries.push('-in:trash -in:sent after:' + CONFIG.SEARCH_SINCE + ' {' + senders.slice(i, i + CONFIG.SEARCH_TERMS_PER_QUERY).join(' ') + '}');
+  }
+  return queries;
 }
 
-function listMessageIds_(query) {
-  const ids = [];
-  let pageToken;
-  do {
-    const res = Gmail.Users.Messages.list('me', { q: query, maxResults: 100, pageToken, includeSpamTrash: true });
-    (res.messages || []).forEach((m) => ids.push(m.id));
-    pageToken = res.nextPageToken;
-  } while (pageToken && ids.length < 1000);
-  return ids;
+// Union of all queries, newest first (Gmail message ids are hex and grow over time).
+function listMessageIds_(queries) {
+  const seen = {};
+  queries.forEach((q) => {
+    let pageToken;
+    let n = 0;
+    do {
+      const res = Gmail.Users.Messages.list('me', { q, maxResults: 100, pageToken, includeSpamTrash: true });
+      (res.messages || []).forEach((m) => { seen[m.id] = true; n++; });
+      pageToken = res.nextPageToken;
+    } while (pageToken && n < 1000);
+  });
+  const key = (id) => ('0000000000000000000000000000000' + id).slice(-32);
+  return Object.keys(seen).sort((a, b) => (key(a) < key(b) ? 1 : key(a) > key(b) ? -1 : 0));
 }
 
 // The Gmail advanced service returns byte fields as byte arrays; the REST API returns base64url strings. Accept both.

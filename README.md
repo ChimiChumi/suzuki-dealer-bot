@@ -26,6 +26,8 @@ Use **Run now** to process immediately (shows a summary), **Stop automation** to
 
 `Config match` = `EXACT` / `UNCLEAR` / `MISMATCH` against the strict target in `src/Config.js`.
 
+Once a dealer is `In stock`, `In production` or `Not available`, a later email from them that brings no new availability or price (e.g. "did you get our offer? please call") does not change the row: it is appended to `Summary` as "Follow-up …" and logged as `FOLLOW-UP`.
+
 ## Ranking
 
 Rows with status *In stock* / *In production*, a price, and `Config match` = `EXACT` are ranked by **Effective cost** (lower is better):
@@ -44,11 +46,28 @@ Emails you manually forward from an address in `CONFIG.FORWARDERS` (e.g. iCloud 
 
 To re-analyse an email, delete its row in `Log`; it is picked up on the next run.
 
+## Outreach sender (separate project: `sender/`)
+
+The initial inquiry email is sent by a **separate** Apps Script project bound to the **Suzuki Outreach Sender** sheet, so the reader bot above stays read-only. The sender has only the `gmail.send` scope: it cannot read your mailbox.
+
+- Content: `sender/src/Template.js` (subject, body) and the embedded configuration PDF (`sender/src/Attachment.js`).
+- Recipients: 73 unique dealer addresses in the `Recipients` tab (untick **Send** to skip a dealer). One separate email per address, single `To`, no CC/BCC.
+
+Menu **Outreach**:
+1. **Setup sheets** – creates `Recipients` and `Test log` (never overwrites existing data).
+2. **Preview** – writes the exact content and recipient list to the `Preview` tab. Sends nothing.
+3. **Send TEST emails** – sends only to the addresses in `SENDER_CONFIG.TEST_RECIPIENTS`. Unlocks LIVE for exactly this content.
+4. **Send LIVE to dealers** – requires: the authorized account is `doboshuni@gmail.com`, a TEST with identical content (any change re-locks), no row stuck in `SENDING`, no invalid/duplicate addresses, and typing `SEND <n>`. Sends for up to ~4.5 minutes per click with 4–8 s gaps, stops on the first error; click again to continue. `SENT` rows are never resent.
+
+If a row stays `SENDING` (run died mid-send), check Gmail's Sent folder, then set it to `SENT` or clear it.
+
 ## Development
 
 ```bash
-python3 scripts/build-dealers.py      # regenerate src/Dealers.js after editing dealer_data.json
-npx @google/clasp@3 push -f           # deploy src/ to Apps Script
+python3 scripts/build-dealers.py         # regenerate src/Dealers.js after editing dealer_data.json
+python3 scripts/build-sender-assets.py   # regenerate sender/src/Recipients.js + Attachment.js (PDF)
+npx @google/clasp@3 push -f              # deploy src/ (reader bot)
+cd sender && npx @google/clasp@3 push -f # deploy the outreach sender
 ```
 
 Gemini free tier allows ~20 requests/day per model; enable billing on the API key's project for real use. Rate-limited messages are retried automatically on the next run.

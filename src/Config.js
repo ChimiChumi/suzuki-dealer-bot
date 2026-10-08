@@ -6,12 +6,15 @@ const CONFIG = {
   // Only emails received on/after this date (YYYY/MM/DD) are analysed.
   SEARCH_SINCE: '2026/10/01',
   // Optional: subject of your outreach email. Replies ("Re: ...") from unknown addresses are then also picked up.
-  OUTREACH_SUBJECT: '',
+  OUTREACH_SUBJECT: 'S-Cross GLX Urban Black', // part of the outreach subject (sender/src/Template.js): catches replies from unknown addresses
 
   // Your own addresses you manually forward dealer emails from. The original dealer sender is read from the forwarded header.
   FORWARDERS: ['doboshuni@icloud.com'],
 
   MAX_MESSAGES_PER_RUN: 15,
+  // Stop starting new emails after this long; Apps Script kills a run at 6 minutes.
+  RUN_BUDGET_MS: 4.5 * 60 * 1000,
+  SEARCH_TERMS_PER_QUERY: 25,
   TRIGGER_MINUTES: 10,
   MAX_PDF_BYTES: 15 * 1024 * 1024,
   MAX_BODY_CHARS: 20000,

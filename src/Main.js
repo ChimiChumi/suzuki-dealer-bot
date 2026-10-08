@@ -15,14 +15,16 @@ function processInbox() {
 
     stats.account = Gmail.Users.getProfile('me').emailAddress;
     const done = processedMessageIds_(logSheet);
-    const found = listMessageIds_(buildSearchQuery_());
+    const found = listMessageIds_(buildSearchQueries_());
     const pending = found.filter((id) => !done[id]).reverse(); // oldest first
     stats.found = found.length;
     stats.pending = pending.length;
     const index = buildDealerIndex_();
     const today = Utilities.formatDate(new Date(), 'Europe/Budapest', 'yyyy-MM-dd');
+    const start = Date.now();
 
     for (const id of pending.slice(0, CONFIG.MAX_MESSAGES_PER_RUN)) {
+      if (Date.now() - start > CONFIG.RUN_BUDGET_MS) break; // the rest stays pending for the next run
       let email = { id, from: '', subject: '', date: '' };
       let codes = [];
       try {
@@ -47,8 +49,17 @@ function processInbox() {
           continue;
         }
         const status = statusFromAnalysis_(a);
-        codes.forEach((code) => table.update(code, rowUpdates_(a, status, email)));
-        appendLog_(logSheet, email, codes, status, a.summary);
+        let result = status;
+        codes.forEach((code) => {
+          const current = table.get(code);
+          if (current && isFollowUpOnly_(a, status, current['Status'])) {
+            result = 'FOLLOW-UP (kept ' + current['Status'] + ')';
+            table.update(code, followUpUpdates_(a, email, current));
+          } else {
+            table.update(code, rowUpdates_(a, status, email));
+          }
+        });
+        appendLog_(logSheet, email, codes, result, a.summary);
       } catch (e) {
         // Rate limit / overload: stop now, the message stays pending for the next run.
         if (e && e.retryable) {
@@ -190,7 +201,24 @@ function rowUpdates_(a, status, email) {
   return u;
 }
 
-// ---------- scoring ----------
+// A later email without new availability/offer info (e.g. "did you get our offer? call me") must not
+// overwrite a clear earlier answer. It is appended to the Summary instead.
+function isFollowUpOnly_(a, status, currentStatus) {
+  const decided = [STATUS.IN_STOCK, STATUS.IN_PRODUCTION, STATUS.NOT_AVAILABLE];
+  if (decided.indexOf(currentStatus) === -1) return false;
+  const hasNewInfo = decided.indexOf(status) !== -1 || (a.hasOffer && a.finalTotalGross > 0);
+  return !hasNewInfo;
+}
+
+function followUpUpdates_(a, email, current) {
+  const day = Utilities.formatDate(email.date, 'Europe/Budapest', 'yyyy-MM-dd');
+  const summary = [current['Summary'], 'Follow-up ' + day + ': ' + a.summary].filter(Boolean).join('\n');
+  return {
+    'Summary': summary.slice(-2000),
+    'Last reply': email.date,
+    'Thread': 'https://mail.google.com/mail/u/0/#all/' + email.threadId,
+  };
+}
 
 function weeksUntil_(eta, now) {
   if (!eta || eta === 'In stock') return 0;
@@ -257,6 +285,10 @@ SheetTable_.prototype.rows = function () {
     this.headers.forEach((h, i) => { o[h] = vals[i]; });
     return o;
   });
+};
+
+SheetTable_.prototype.get = function (code) {
+  return this.rows().find((r) => String(r['Code']) === code) || null;
 };
 
 SheetTable_.prototype.update = function (code, updates) {

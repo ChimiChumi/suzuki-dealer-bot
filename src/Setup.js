@@ -204,7 +204,7 @@ function diagnose() {
     'Automation trigger active: ' + (ScriptApp.getProjectTriggers().some((t) => t.getHandlerFunction() === 'processInbox') ? 'yes' : 'no'),
     '',
     'Emails found since ' + CONFIG.SEARCH_SINCE + ':',
-    '- bot search: ' + count(buildSearchQuery_()),
+    '- bot search: ' + listMessageIds_(buildSearchQueries_()).length,
     '- all emails: ' + count('-in:trash' + since),
     '- with PDF attachment: ' + count('filename:pdf -in:trash' + since),
   ];
