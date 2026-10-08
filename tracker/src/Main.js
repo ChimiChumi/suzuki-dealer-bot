@@ -65,6 +65,7 @@ function processInbox() {
         if (e && e.retryable) {
           stats.processed--;
           stats.rateLimited = true;
+          stats.lastError = String(e.message);
           break;
         }
         stats.errors++;
@@ -91,7 +92,7 @@ function runNow() {
     'New (not yet in Log): ' + s.pending,
     'Processed now: ' + s.processed,
     s.errors ? 'Errors: ' + s.errors + ' (see Log sheet). Last: ' + s.lastError : '',
-    s.rateLimited ? 'Gemini rate limit hit: the rest will be processed on the next run.' : '',
+    s.rateLimited ? 'Gemini paused (quota, credits or overload): waiting emails stay queued for the next run.\n' + s.lastError : '',
     s.pending > s.processed + s.errors && !s.rateLimited ? 'More remaining: they will be processed on the next runs.' : '',
   ].filter(Boolean).join('\n'));
 }

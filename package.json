@@ -1,0 +1,12 @@
+{
+  "name": "suzuki-dealer-bot",
+  "private": true,
+  "description": "Google Apps Script tools: Suzuki dealer outreach sender and Gemini-based reply tracker.",
+  "scripts": {
+    "test": "node tests/tracker.test.js && node tests/sender.test.js",
+    "build:dealers": "python3 scripts/build-dealers.py",
+    "build:sender": "python3 scripts/build-sender-assets.py",
+    "push:tracker": "cd tracker && npx -y @google/clasp@3 push -f",
+    "push:sender": "cd sender && npx -y @google/clasp@3 push -f"
+  }
+}

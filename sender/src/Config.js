@@ -1,4 +1,4 @@
-// Outreach sender settings. This project is separate from the read-only reader bot on purpose:
+// Outreach sender settings. This project is separate from the read-only reply tracker (tracker/) on purpose:
 // it can only SEND (scope gmail.send), it cannot read your mailbox.
 
 const SENDER_CONFIG = {

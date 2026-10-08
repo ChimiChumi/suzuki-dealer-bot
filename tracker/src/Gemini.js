@@ -109,7 +109,8 @@ function analyzeEmail_(apiKey, email, candidates, today) {
     Utilities.sleep(delay * 1000);
   }
   const err = new Error('Gemini error: ' + res.getResponseCode() + ' ' + res.getContentText().slice(0, 300));
-  err.retryable = res.getResponseCode() === 429 || res.getResponseCode() >= 500;
+  // Quota (429), billing/no credits (402) and server errors: pause and keep the email queued instead of failing it.
+  err.retryable = [402, 429].indexOf(res.getResponseCode()) !== -1 || res.getResponseCode() >= 500;
   throw err;
 }
 

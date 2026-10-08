@@ -18,7 +18,7 @@ EMAIL_RE = re.compile(r"^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$")
 
 
 def build_recipients():
-    with open(os.path.join(ROOT, "dealer_data.json"), encoding="utf-8") as f:
+    with open(os.path.join(ROOT, "data", "dealer_data.json"), encoding="utf-8") as f:
         dealers = json.load(f)
     by_email = {}
     for d in dealers:
@@ -53,9 +53,9 @@ def build_attachment(pdf_path):
 if __name__ == "__main__":
     pdf = sys.argv[1] if len(sys.argv) > 1 else None
     if not pdf:
-        found = [p for p in glob.glob(os.path.join(ROOT, "*.pdf")) if "Konfigur" in unicodedata.normalize("NFC", p)]
+        found = glob.glob(os.path.join(ROOT, "data", "*.pdf"))
         if len(found) != 1:
-            sys.exit("Pass the configuration PDF path explicitly.")
+            sys.exit("Expected exactly one PDF in data/. Pass the configuration PDF path explicitly.")
         pdf = found[0]
     os.makedirs(OUT, exist_ok=True)
     build_recipients()
